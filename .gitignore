@@ -1,0 +1,9 @@
+data/acceso.sqlite3
+data/settings.json
+data/rostros/
+data/modelo_lbph.yml
+reportes/*.xlsx
+__pycache__/
+*.pyc
+venv/
+.venv/
