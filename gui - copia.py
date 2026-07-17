@@ -26,7 +26,6 @@ import database
 import notificaciones
 from recognizer import FaceEngine, DetectorDeParpadeo
 import reportes_excel
-import ia_portero
 
 
 CATEGORIAS = ["administrador", "propietario", "inquilino", "visita_frecuente"]
@@ -744,43 +743,13 @@ class ReconocimientoWindow(tk.Toplevel):
             return
 
         emails = database.emails_por_depto(depto)
-
-        # --- Conversación con el visitante a través del portero con IA ---
-        # (Observación -> Análisis -> Planificación del ciclo del agente)
-        self._log("🎙️ Iniciando conversación con el visitante (portero con IA)...")
-        self.update()
-        resultado_ia = None
-        try:
-            resultado_ia = ia_portero.ejecutar_via_c_con_ia()
-            self._log(
-                f"🤖 IA sugiere: {resultado_ia.recomendacion} "
-                f"(riesgo {resultado_ia.nivel_riesgo}) - {resultado_ia.justificacion}"
-            )
-        except Exception as e:
-            # Degradación elegante: si falla el micrófono, la API key, o la
-            # conexión, se sigue con la videollamada simulada de siempre.
-            self._log(f"⚠️ IA del portero no disponible ({e}). Se usa videollamada simulada.")
-
         if notificaciones.enviar_notificacion_visita(depto, emails, detalle="Videollamada simulada desde el tótem."):
             self._log(f"📧 Notificación enviada a los residentes del depto {depto}.")
 
-        # --- Confirmación final del residente (Acción del ciclo del agente) ---
-        # La IA solo recomienda; la decisión final sigue siendo del residente.
-        resultado = self._preguntar_autorizacion(depto, resultado_ia)
-
-        detalle_ia = ""
-        if resultado_ia:
-            detalle_ia = (
-                f" | IA: {resultado_ia.recomendacion} (riesgo {resultado_ia.nivel_riesgo}) "
-                f"- {resultado_ia.justificacion}"
-            )
-            decision_texto = {"s": "autorizado", "n": "rechazado"}.get(resultado, "no_atendio")
-            database.guardar_conversacion_visitante(depto, resultado_ia, decision_texto)
-
+        resultado = self._preguntar_autorizacion(depto)
         if resultado == "s":
             self._log(f"✅ Acceso autorizado por depto {depto}.")
-            database.log_evento("C", "permitido", depto_destino=depto,
-                                 detalle="Autorizado por videollamada" + detalle_ia)
+            database.log_evento("C", "permitido", depto_destino=depto, detalle="Autorizado por videollamada")
             self._acceso_concedido(
                 depto=depto, nombre_persona="Visita (sin registro facial)",
                 metodo="Visita autorizada por videollamada",
@@ -790,42 +759,18 @@ class ReconocimientoWindow(tk.Toplevel):
             motivo = "Rechazado por residente" if resultado == "n" else "No atendió la llamada"
             self._log(f"⛔ Acceso denegado - depto {depto} ({motivo}).")
             database.registrar_rechazo_visita(depto)
-            database.log_evento("C", "denegado", depto_destino=depto, detalle=motivo + detalle_ia)
+            database.log_evento("C", "denegado", depto_destino=depto, detalle=motivo)
 
-    def _preguntar_autorizacion(self, depto, resultado_ia=None):
+    def _preguntar_autorizacion(self, depto):
         resultado = {"valor": None}
         top = tk.Toplevel(self)
         top.title("Videollamada simulada")
         top.configure(bg=COLOR_FONDO)
         top.grab_set()
-
-        tk.Label(top, text=f"Depto {depto} - ¿Autoriza el ingreso de la visita?",
-                 padx=20, pady=(15, 5), font=("Segoe UI", 11, "bold"), bg=COLOR_FONDO,
-                 fg=COLOR_TITULO).pack()
-
-        if resultado_ia:
-            colores_riesgo = {"BAJO": "#2E7D32", "MEDIO": "#F9A825", "ALTO": "#C62828"}
-            color = colores_riesgo.get(resultado_ia.nivel_riesgo, "#555")
-
-            info = tk.Frame(top, bg=COLOR_FONDO)
-            info.pack(padx=20, pady=(0, 10), fill="x")
-
-            tk.Label(info, text=f"Motivo: {resultado_ia.motivo_visita or 'no especificado'}",
-                     bg=COLOR_FONDO, font=("Segoe UI", 9), wraplength=340, justify="left",
-                     anchor="w").pack(fill="x")
-            tk.Label(info, text=f"Sugerencia de la IA: {resultado_ia.recomendacion}  "
-                                 f"(riesgo {resultado_ia.nivel_riesgo})",
-                     bg=COLOR_FONDO, fg=color, font=("Segoe UI", 9, "bold"),
-                     wraplength=340, justify="left", anchor="w").pack(fill="x", pady=(2, 0))
-            tk.Label(info, text=resultado_ia.justificacion,
-                     bg=COLOR_FONDO, font=("Segoe UI", 9), wraplength=340, justify="left",
-                     anchor="w").pack(fill="x", pady=(2, 0))
-        else:
-            tk.Label(top, text="Simulando videollamada (sin evaluación de IA disponible).",
-                     bg=COLOR_FONDO, font=("Segoe UI", 9), padx=20).pack()
-
+        tk.Label(top, text=f"Simulando videollamada al depto {depto}.\n¿Autoriza el ingreso?",
+                 padx=20, pady=15, font=("Segoe UI", 11), bg=COLOR_FONDO).pack()
         frame = tk.Frame(top, bg=COLOR_FONDO)
-        frame.pack(pady=(10, 15))
+        frame.pack(pady=(0, 15))
 
         def elegir(v):
             resultado["valor"] = v
@@ -887,14 +832,6 @@ class ConfiguracionDialog(tk.Toplevel):
         self._campo_texto("Contraseña de aplicación", "SMTP_PASSWORD", actuales, oculto=True)
         self._campo_texto("Nombre del remitente", "SMTP_FROM_NAME", actuales)
 
-        tk.Label(self, text="IA del Portero Virtual (Vía C)", font=("Segoe UI", 11, "bold"),
-                 bg=COLOR_FONDO, fg=COLOR_TITULO).pack(pady=(15, 5), anchor="w", padx=20)
-        tk.Label(self, text="Se usa para el agente conversacional del intercomunicador (STT + LLM + TTS).",
-                 font=("Segoe UI", 8), bg=COLOR_FONDO, fg="#33691E", wraplength=330, justify="left").pack(
-                     anchor="w", padx=20)
-
-        self._campo_texto("Anthropic API Key", "ANTHROPIC_API_KEY", actuales, oculto=True)
-
         boton_estilizado(self, "Guardar configuración", self.guardar).pack(pady=20, fill="x", padx=20)
 
     def _campo_texto(self, etiqueta, clave, actuales, oculto=False):
@@ -917,7 +854,7 @@ class ConfiguracionDialog(tk.Toplevel):
 
         nuevos["LIVENESS_REQUIERE_PARPADEO"] = self.liveness_var.get()
         nuevos["NOTIFICAR_VISITAS_POR_EMAIL"] = self.notificar_var.get()
-        for clave in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM_NAME", "ANTHROPIC_API_KEY"):
+        for clave in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM_NAME"):
             nuevos[clave] = self.vars[clave].get()
 
         settings.guardar(nuevos)

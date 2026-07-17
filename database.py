@@ -6,6 +6,7 @@ Implementa, sobre SQLite:
 - Decisiones anteriores / logs de acceso (Historial_Accesos)
 - Resultados obtenidos (para el módulo de reportes)
 - Reglas simples derivadas del historial (ej: 3 rechazos -> lista negra)
+- Conversaciones del portero virtual con IA (vía C)
 """
 import sqlite3
 import datetime
@@ -77,6 +78,20 @@ def init_db():
             timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
             depto_destino TEXT,
             foto_path TEXT
+        );
+        """)
+
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS conversaciones_visitantes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_hora TEXT DEFAULT CURRENT_TIMESTAMP,
+            depto_destino TEXT,
+            motivo_visita TEXT,
+            nivel_riesgo TEXT,             -- BAJO | MEDIO | ALTO
+            recomendacion TEXT,            -- AUTORIZAR | RECHAZAR | DERIVAR
+            justificacion TEXT,
+            transcripcion TEXT,
+            decision_final_residente TEXT  -- para la etapa de Evaluación/Aprendizaje
         );
         """)
 
@@ -232,3 +247,60 @@ def reporte_semanal():
             "denegados": denegados,
             "por_camino": {r["camino"]: r["c"] for r in por_camino},
         }
+
+
+# ---------------- Conversaciones del portero con IA (Vía C) ----------------
+
+def guardar_conversacion_visitante(depto_destino, resultado_ia, decision_final_residente=None):
+    """
+    Guarda el intercambio completo entre el visitante y el portero con IA.
+
+    `resultado_ia` es el objeto ResultadoEvaluacion que devuelve
+    ia_portero.ejecutar_via_c_con_ia() (tiene .motivo_visita, .nivel_riesgo,
+    .recomendacion, .justificacion, .transcripcion_completa).
+
+    `decision_final_residente` es opcional en el momento de guardar (podés
+    completarla después con actualizar_decision_conversacion) para la etapa
+    de Evaluación/Aprendizaje: comparar lo que sugirió la IA contra lo que
+    finalmente decidió el residente.
+    """
+    with get_conn() as conn:
+        cursor = conn.execute("""
+            INSERT INTO conversaciones_visitantes
+                (depto_destino, motivo_visita, nivel_riesgo, recomendacion,
+                 justificacion, transcripcion, decision_final_residente)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            depto_destino,
+            resultado_ia.motivo_visita,
+            resultado_ia.nivel_riesgo,
+            resultado_ia.recomendacion,
+            resultado_ia.justificacion,
+            resultado_ia.transcripcion_completa,
+            decision_final_residente,
+        ))
+        return cursor.lastrowid
+
+
+def actualizar_decision_conversacion(id_conversacion, decision_final_residente):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE conversaciones_visitantes SET decision_final_residente = ? WHERE id = ?",
+            (decision_final_residente, id_conversacion)
+        )
+
+
+def listar_conversaciones_visitante(depto_destino=None, limite=100):
+    """Lista conversaciones recientes del portero con IA. Si se pasa
+    `depto_destino`, filtra solo las de ese depto."""
+    with get_conn() as conn:
+        if depto_destino:
+            return conn.execute("""
+                SELECT * FROM conversaciones_visitantes
+                WHERE depto_destino = ?
+                ORDER BY fecha_hora DESC LIMIT ?
+            """, (depto_destino, limite)).fetchall()
+        return conn.execute("""
+            SELECT * FROM conversaciones_visitantes
+            ORDER BY fecha_hora DESC LIMIT ?
+        """, (limite,)).fetchall()

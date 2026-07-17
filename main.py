@@ -14,6 +14,9 @@ Ciclo (se repite indefinidamente, como describe el PDF):
 
 Ejecutar:  python main.py
 Requisito previo: haber enrolado al menos una persona con enroll.py
+
+from ia_portero import ejecutar_via_c_con_ia
+   resultado = ejecutar_via_c_con_ia()
 """
 import time
 import cv2
@@ -198,3 +201,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+from ia_portero import ejecutar_via_c_con_ia
+   resultado = ejecutar_via_c_con_ia()

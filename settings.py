@@ -12,6 +12,7 @@ import os
 
 import config
 
+
 CAMPOS_EDITABLES = [
     "CAMERA_INDEX",
     "UMBRAL_CONFIANZA_RESIDENTE",
@@ -23,6 +24,7 @@ CAMPOS_EDITABLES = [
     "SMTP_USER",
     "SMTP_PASSWORD",
     "SMTP_FROM_NAME",
+    "ANTHROPIC_API_KEY",   # <- nueva línea
 ]
 
 _SETTINGS_PATH = os.path.join(config.DATA_DIR, "settings.json")
